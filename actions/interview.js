@@ -49,9 +49,18 @@ export async function generateQuiz() {
     const text = response.text();
     const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
     const quiz = JSON.parse(cleanedText);
-    const safeQuiz = JSON.parse(JSON.stringify(quiz.questions)); 
+    if (!quiz || !Array.isArray(quiz.questions)) {
+    throw new Error("Invalid quiz format received from AI");
+}
 
-    return safeQuiz;
+// Force-serialize all values
+const serializableQuestions = quiz.questions.map((q) => ({
+  question: String(q.question),
+  options: q.options.map(String),
+  correctAnswer: String(q.correctAnswer),
+  explanation: String(q.explanation),
+}));
+return serializableQuestions;
   } catch (error) {
     console.error("Error generating quiz:", error);
     throw new Error("Failed to generate quiz questions");
