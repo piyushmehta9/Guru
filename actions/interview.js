@@ -49,8 +49,9 @@ export async function generateQuiz() {
     const text = response.text();
     const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
     const quiz = JSON.parse(cleanedText);
+    const safeQuiz = JSON.parse(JSON.stringify(quiz.questions)); 
 
-    return quiz.questions;
+    return safeQuiz;
   } catch (error) {
     console.error("Error generating quiz:", error);
     throw new Error("Failed to generate quiz questions");
