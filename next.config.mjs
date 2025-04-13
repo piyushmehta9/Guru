@@ -1,9 +1,4 @@
 /** @type {import('next').NextConfig} */
-module.exports = {
-  eslint: {
-    ignoreDuringBuilds: true,
-  },
-};
 const nextConfig = {
     images: {
       remotePatterns: [
@@ -13,6 +8,9 @@ const nextConfig = {
         },
       ],
     },
+  eslint: {
+    ignoreDuringBuilds: true,
+  },
   };
 
 export default nextConfig;
