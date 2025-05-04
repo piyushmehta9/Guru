@@ -4,60 +4,13 @@ import { db } from "@/lib/prisma";
 import { auth } from "@clerk/nextjs/server";
 import { GoogleGenerativeAI } from "@google/generative-ai";
  
-// Initialize the Google Generative AI client with the provided API key
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
  
-// Temporary in-memory storage for quiz questions (this will reset when the server restarts)
-let quizQuestions = [];
- 
-// Function to generate a chunk of quiz questions (e.g., 4 questions at a time)
-async function generateQuestionsChunk(user, startIndex = 0, chunkSize = 4) {
-  const prompt = `
-    Generate ${chunkSize} technical interview questions for a ${
-    user.industry
-  } professional${
-    user.skills?.length ? ` with expertise in ${user.skills.join(", ")}` : ""
-  }.
- 
-  Each question should be multiple choice with 4 options.
- 
-  Return the response in this JSON format only, no additional text:
-  {
-    "questions": [
-      {
-        "question": "string",
-        "options": ["string", "string", "string", "string"],
-        "correctAnswer": "string",
-        "explanation": "string"
-      }
-    ]
-  }
-  `;
- 
-  try {
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    const text = response.text();
-    const cleanedText = text.replace(/```(?:json)?\n?/g, "").trim();
-    const quiz = JSON.parse(cleanedText);
- 
-    // Add the newly generated questions to the in-memory array
-    quizQuestions = [...quizQuestions, ...quiz.questions];
- 
-    return quiz.questions;
-  } catch (error) {
-    console.error("Error generating quiz chunk:", error);
-    throw new Error("Failed to generate quiz chunk");
-  }
-}
- 
-// Function to fetch the next chunk of quiz questions
-export async function fetchQuizChunk() {
+export async function generateQuiz() {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
  
-  // Fetch user details
   const user = await db.user.findUnique({
     where: { clerkUserId: userId },
     select: {
@@ -68,24 +21,45 @@ export async function fetchQuizChunk() {
  
   if (!user) throw new Error("User not found");
  
-  // The chunk size is 4 questions per request (you can adjust this value)
-  const chunkSize = 4;
+  const basePrompt = (count: number) => `
+    Generate ${count} technical interview questions for a ${user.industry} professional${
+    user.skills?.length ? ` with expertise in ${user.skills.join(", ")}` : ""
+  }.
  
-  // Generate questions in chunks (starting from the last question index)
-  await generateQuestionsChunk(user, quizQuestions.length, chunkSize);
+    Each question should be multiple choice with 4 options.
  
-  // Serve the next chunk of questions
-  const chunk = quizQuestions.slice(quizQuestions.length - chunkSize);
+    Return the response in this JSON format only, no additional text:
+    {
+      "questions": [
+        {
+          "question": "string",
+          "options": ["string", "string", "string", "string"],
+          "correctAnswer": "string",
+          "explanation": "string"
+        }
+      ]
+    }
+  `;
  
-  return chunk;
+  const allQuestions = [];
+ 
+  try {
+    // 4 chunks of 5 questions
+    for (let i = 0; i < 4; i++) {
+      const prompt = basePrompt(5);
+      const result = await model.generateContent(prompt);
+      const text = result.response.text().replace(/```(?:json)?\n?/g, "").trim();
+      const parsed = JSON.parse(text);
+      allQuestions.push(...parsed.questions);
+    }
+ 
+    return allQuestions;
+  } catch (error) {
+    console.error("Error generating quiz:", error);
+    throw new Error("Failed to generate quiz questions");
+  }
 }
  
-// Optionally, function to clear the quiz questions array (for resetting)
-export async function clearQuizQuestions() {
-  quizQuestions = [];
-}
- 
-// Function to save quiz results
 export async function saveQuizResult(questions, answers, score) {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
@@ -104,11 +78,9 @@ export async function saveQuizResult(questions, answers, score) {
     explanation: q.explanation,
   }));
  
-  // Get wrong answers
   const wrongAnswers = questionResults.filter((q) => !q.isCorrect);
- 
-  // Only generate improvement tips if there are wrong answers
   let improvementTip = null;
+ 
   if (wrongAnswers.length > 0) {
     const wrongQuestionsText = wrongAnswers
       .map(
@@ -132,10 +104,8 @@ export async function saveQuizResult(questions, answers, score) {
       const result = await model.generateContent(improvementPrompt);
       const response = result.response;
       improvementTip = response.text().trim();
-      console.log(improvementTip);
     } catch (error) {
       console.error("Error generating improvement tip:", error);
-      // Continue without improvement tip if generation fails
     }
   }
  
@@ -157,7 +127,6 @@ export async function saveQuizResult(questions, answers, score) {
   }
 }
  
-// Function to fetch previous assessments
 export async function getAssessments() {
   const { userId } = await auth();
   if (!userId) throw new Error("Unauthorized");
